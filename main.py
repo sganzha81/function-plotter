@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+from numpy import sin, cos, sqrt
 
 formula = input("Enter function of x: ")
 
