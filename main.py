@@ -4,8 +4,15 @@ import matplotlib.pyplot as plt
 from numpy import sin, cos, sqrt
 
 formula = input("Enter function of x: ")
+x_min = float(input("Enter x min: "))
+x_max = float(input("Enter x max: "))
+num_points = int(input("Enter number of points: "))
 
-x = np.linspace(-10, 10, 100)
+if x_min >= x_max:
+    print("Error: x min must be less than x max")
+    exit()
+
+x = np.linspace(x_min, x_max, num_points)
 try:
     y = eval(formula)
 except:
