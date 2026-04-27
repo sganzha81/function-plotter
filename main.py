@@ -1,58 +1,88 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from numpy import sin, cos, sqrt
+from typing import Optional
 
-while True:
-    # Запрашиваем формулу у пользователя
-    formula = input("Enter function of x (or type 'quit' to exit): ")
-    if formula == 'quit':
-        break
-
-    # Проверяем формулу на синтаксическую ошибку, подставляя test_x = 0
+def evaluate_formula(formula: str, x_val: float) -> Optional[float]:
+    """
+    Проверяет формулу на синтаксическую корректность и возвращает число.
+    Если формула невалидна или возвращает не число — вернёт None.
+    """
     try:
-        x = 0
-        test_y = eval(formula)   
-        # Убедимся, что результат - число (не функция и не None)
-        if not np.isscalar(test_y):
-            raise ValueError
+        # Временно подставляем x_val (обычно 0) и вычисляем
+        x = x_val
+        result = eval(formula)
+        # Проверяем, что результат — число, а не функция или None
+        if np.isscalar(result):
+            return float(result)  # приводим к float, если это число
+        else:
+            return None
     except:
-        print("Error: invalid formula")
-        print("Examples: x**2, sin(x), x**2 + 3*x - 1")
-        continue    # не спрашиваем параметры, начинаем цикл заново
-    
-    # Если формула корректна, запрашиваем параметры графика
-    x_min = float(input("Enter x min: "))
-    x_max = float(input("Enter x max: "))
-    
-    if x_min >= x_max:
-        print("Error: x min must be less than x max")
-        continue
+        return None
 
-    num_points = int(input("Enter number of points: "))
-    
-    # Создаём массив x и вычисляем y
+def plot_graph(formula: str, x_min: float, x_max: float, num_points: int) -> None:
+    """Строит график функции, сохраняет его в файл по желанию пользователя."""
+    # Создаём массив x
     x = np.linspace(x_min, x_max, num_points)
-    # Вычисляем y для каждого x
+    # Вычисляем y
     try:
         y = eval(formula)
     except:
-        # На всякий случай (хотя формула уже прошла проверку)
-        print("Error: formula cannot be evaluated for the entire x array")
-        print("This can happen if you used non-vectorized functions (e.g., round(x), int(x))")
-        print("Use only numpy-compatible operations: +, -, *, /, **, sin, cos, sqrt, etc.")
-        continue
-    
-        # Проверяем, нет ли нечисловых значений (например, sqrt отрицательного)
-        if np.any(np.isnan(y)):
-            print("Invalid values in formula (e.g., sqrt of negative number)")
-            continue
-    
-    # Рисуем график
+        print("Error: invalid formula")
+        print("Examples: x**2, sin(x), x**2 + 3*x - 1")
+        return
+
+    # Проверка на нечисловые значения
+    if np.any(np.isnan(y)):
+        print("Invalid values in formula (e.g., sqrt of negative number)")
+        return
+
+    # Строим график
     plt.plot(x, y)
     plt.title(f"Graph of y = {formula}")
     plt.xlabel("x")
     plt.ylabel("y")
     plt.grid(True)
+
+    # Сохранение в файл
+    save_choice: str = input("Save plot to file? (y/n): ").strip().lower()
+    if save_choice == 'y':
+        filename: str = input("Enter filename (default: plot.png): ").strip()
+        if not filename:
+            filename = "plot.png"
+        if not filename.endswith('.png'):
+            filename += '.png'
+        plt.savefig(filename)
+        print(f"Plot saved as {filename}")
+
     plt.show()
 
-print("Goodbye!")
+def main() -> None:
+    """Основной цикл программы."""
+    while True:
+        formula: str = input("Enter function of x (or type 'quit' to exit): ")
+        if formula == 'quit':
+            break
+
+        # Проверяем формулу (с x=0)
+        if evaluate_formula(formula, 0.0) is None:
+            print("Error: invalid formula (syntax or non-numeric result)")
+            print("Examples: x**2, sin(x), x**2 + 3*x - 1")
+            continue
+
+        # Запрашиваем параметры графика
+        x_min: float = float(input("Enter x min: "))
+        x_max: float = float(input("Enter x max: "))
+        if x_min >= x_max:
+            print("Error: x min must be less than x max")
+            continue
+
+        num_points: int = int(input("Enter number of points: "))
+
+        # Строим график
+        plot_graph(formula, x_min, x_max, num_points)
+
+    print("Goodbye!")
+
+if __name__ == "__main__":
+    main()
