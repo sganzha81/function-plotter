@@ -1,24 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from numpy import sin, cos, sqrt
-from typing import Optional
 
-def evaluate_formula(formula: str, x_val: float) -> Optional[float]:
-    """
-    Проверяет формулу на синтаксическую корректность и возвращает число.
-    Если формула невалидна или возвращает не число — вернёт None.
-    """
-    try:
-        # Временно подставляем x_val (обычно 0) и вычисляем
-        x = x_val
-        result = eval(formula)
-        # Проверяем, что результат — число, а не функция или None
-        if np.isscalar(result):
-            return float(result)  # приводим к float, если это число
-        else:
-            return None
-    except:
-        return None
+from typing import Optional
+from plotter.evaluator import evaluate_formula
+
 
 def plot_graph(formula: str, x_min: float, x_max: float, num_points: int) -> None:
     """Строит график функции, сохраняет его в файл по желанию пользователя."""
@@ -46,22 +31,23 @@ def plot_graph(formula: str, x_min: float, x_max: float, num_points: int) -> Non
 
     # Сохранение в файл
     save_choice: str = input("Save plot to file? (y/n): ").strip().lower()
-    if save_choice == 'y':
+    if save_choice == "y":
         filename: str = input("Enter filename (default: plot.png): ").strip()
         if not filename:
             filename = "plot.png"
-        if not filename.endswith('.png'):
-            filename += '.png'
+        if not filename.endswith(".png"):
+            filename += ".png"
         plt.savefig(filename)
         print(f"Plot saved as {filename}")
 
     plt.show()
 
+
 def main() -> None:
     """Основной цикл программы."""
     while True:
         formula: str = input("Enter function of x (or type 'quit' to exit): ")
-        if formula == 'quit':
+        if formula == "quit":
             break
 
         # Проверяем формулу (с x=0)
@@ -83,6 +69,7 @@ def main() -> None:
         plot_graph(formula, x_min, x_max, num_points)
 
     print("Goodbye!")
+
 
 if __name__ == "__main__":
     main()
