@@ -4,3 +4,6 @@
 
 venv/
 *.geany
+
+__pycache__/
+*.py[cod]
