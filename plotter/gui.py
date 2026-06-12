@@ -3,7 +3,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from plotter.evaluator import evaluate_formula
+from plotter.evaluator import (
+    evaluate_formula,
+    validate_formula_at_points,
+    validate_y_values,
+)
 
 
 class FunctionPlotterApp(ctk.CTk):
@@ -97,11 +101,26 @@ class FunctionPlotterApp(ctk.CTk):
             self.status_label.configure(text="Error: points must be at least 2.")
             return
 
+        validation_points = []
+
+        if x_min < 0 < x_max:
+            validation_points.append(0.0)
+
+        if validation_points:
+            is_valid, error_message = validate_formula_at_points(
+                formula, validation_points
+            )
+
+            if not is_valid:
+                self.status_label.configure(text=f"Error: {error_message}")
+                return
+
         x = np.linspace(x_min, x_max, points)
         y = evaluate_formula(formula, x)
+        is_valid, error_message = validate_y_values(y, expected_length=points)
 
-        if y is None:
-            self.status_label.configure(text="Error: invalid formula.")
+        if not is_valid:
+            self.status_label.configure(text=f"Error: {error_message}")
             return
 
         self.ax.clear()
