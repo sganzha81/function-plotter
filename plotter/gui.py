@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 from plotter.evaluator import (
     evaluate_formula,
@@ -74,7 +74,33 @@ class FunctionPlotterApp(ctk.CTk):
 
         self.figure, self.ax = plt.subplots(figsize=(7, 4))
         self.canvas = FigureCanvasTkAgg(self.figure, master=self)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
+        self.toolbar.update()
+        self._create_toolbar()
         self.canvas.get_tk_widget().pack(fill="both", expand=True, padx=16, pady=16)
+
+    def _create_toolbar(self):
+        self.toolbar_frame = ctk.CTkFrame(self)
+        self.toolbar_frame.pack(fill="x", padx=16, pady=(0, 8))
+
+        toolbar_buttons = (
+            ("⌂ Home", self.toolbar.home),
+            ("← Back", self.toolbar.back),
+            ("→ Forward", self.toolbar.forward),
+            ("✋ Pan", self.toolbar.pan),
+            ("🔍 Zoom", self.toolbar.zoom),
+            ("💾 Save", self.toolbar.save_figure),
+        )
+
+        for column, (text, command) in enumerate(toolbar_buttons):
+            button = ctk.CTkButton(
+                self.toolbar_frame,
+                text=text,
+                command=command,
+                width=84,
+            )
+            button.grid(row=0, column=column, padx=4, pady=6, sticky="ew")
+            self.toolbar_frame.grid_columnconfigure(column, weight=1)
 
     def plot_graph(self):
         formula = self.formula_entry.get().strip()
@@ -136,6 +162,12 @@ class FunctionPlotterApp(ctk.CTk):
 
     def on_closing(self):
         """Close the app and clean up matplotlib resources."""
+        if hasattr(self, "toolbar"):
+            self.toolbar.destroy()
+
+        if hasattr(self, "toolbar_frame"):
+            self.toolbar_frame.destroy()
+
         if hasattr(self, "canvas"):
             self.canvas.get_tk_widget().destroy()
 
