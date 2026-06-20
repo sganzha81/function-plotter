@@ -1,4 +1,5 @@
 import tkinter as tk
+from pathlib import Path
 
 import customtkinter as ctk
 import matplotlib.pyplot as plt
@@ -21,6 +22,7 @@ class FunctionPlotterApp(ctk.CTk):
         self.title("Function Plotter")
         self.geometry("1200x700")
         self.minsize(900, 600)
+        self._set_window_icon()
 
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -28,6 +30,15 @@ class FunctionPlotterApp(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self._create_widgets()
+
+    def _set_window_icon(self):
+        icon_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.png"
+
+        try:
+            self.app_icon = tk.PhotoImage(file=str(icon_path))
+            self.iconphoto(True, self.app_icon)
+        except (OSError, tk.TclError):
+            self.app_icon = None
 
     def _create_widgets(self):
         self.paned_window = tk.PanedWindow(
