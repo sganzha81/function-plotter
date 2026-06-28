@@ -8,8 +8,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 
 from plotter.evaluator import (
     evaluate_formula,
-    validate_formula_at_points,
-    validate_y_values,
+    prepare_y_values_for_plotting,
 )
 
 MAX_FUNCTIONS = 5
@@ -256,36 +255,22 @@ class FunctionPlotterApp(ctk.CTk):
             self.status_label.configure(text="Error: points must be at least 2.")
             return
 
-        validation_points = []
-
-        if x_min < 0 < x_max:
-            validation_points.append(0.0)
-
         x = np.linspace(x_min, x_max, points)
         plot_data = []
 
         for formula_number, formula in formulas:
-            if validation_points:
-                is_valid, error_message = validate_formula_at_points(
-                    formula, validation_points
-                )
-
-                if not is_valid:
-                    self.status_label.configure(
-                        text=f"Error in Formula {formula_number}: {error_message}"
-                    )
-                    return
-
             y = evaluate_formula(formula, x)
-            is_valid, error_message = validate_y_values(y, expected_length=points)
-
-            if not is_valid:
+            prepared_y, error_message = prepare_y_values_for_plotting(
+                y,
+                expected_length=points,
+            )
+            if prepared_y is None:
                 self.status_label.configure(
                     text=f"Error in Formula {formula_number}: {error_message}"
                 )
                 return
 
-            plot_data.append((formula, y))
+            plot_data.append((formula, prepared_y))
 
         self.ax.clear()
         for formula, y in plot_data:

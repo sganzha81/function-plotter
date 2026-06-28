@@ -3,8 +3,7 @@ import numpy as np
 
 from plotter.evaluator import (
     evaluate_formula,
-    validate_formula_at_points,
-    validate_y_values,
+    prepare_y_values_for_plotting,
 )
 
 MAX_FUNCTIONS = 5
@@ -73,33 +72,20 @@ def plot_graph(
     num_points: int,
 ) -> None:
     """Validate and plot all formulas on one graph."""
-    validation_points = []
-    if x_min < 0 < x_max:
-        validation_points.append(0.0)
-
     x = np.linspace(x_min, x_max, num_points)
     plot_data = []
 
     for function_number, formula in enumerate(formulas, start=1):
-        if validation_points:
-            is_valid, error_message = validate_formula_at_points(
-                formula,
-                validation_points,
-            )
-            if not is_valid:
-                print(f"Error in Function {function_number}: {error_message}")
-                return
-
         y = evaluate_formula(formula, x)
-        is_valid, error_message = validate_y_values(
+        prepared_y, error_message = prepare_y_values_for_plotting(
             y,
             expected_length=num_points,
         )
-        if not is_valid:
+        if prepared_y is None:
             print(f"Error in Function {function_number}: {error_message}")
             return
 
-        plot_data.append((formula, y))
+        plot_data.append((formula, prepared_y))
 
     figure, axes = plt.subplots()
     for formula, y in plot_data:
