@@ -1,3 +1,10 @@
 .venv
 *.png
+!assets/app_icon.png
 .DS_Store
+
+venv/
+*.geany
+
+__pycache__/
+*.py[cod]
