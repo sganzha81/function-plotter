@@ -1,6 +1,7 @@
 name: Build Windows EXE
 
 on:
+  workflow_dispatch: {}
   push:
     tags:
       - "v*"
@@ -31,5 +32,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: function-plotter-windows
-          path: dist/*
+          name: function-plotter-${{ github.ref_name }}-${{ github.sha }}
+          path: dist/
