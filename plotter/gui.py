@@ -7,10 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
-from plotter.evaluator import (
-    evaluate_formula,
-    prepare_y_values_for_plotting,
-)
+from plotter.evaluator import evaluate_formula
 
 MAX_FUNCTIONS = 5
 
@@ -20,9 +17,105 @@ def _resource_path(path):
     return os.path.join(base, path)
 
 
+def classify_function(formula: str) -> str:
+    normalized_formula = formula.lower().replace(" ", "")
+
+    if "tan" in normalized_formula:
+        return "tan_asymptote"
+    reciprocal_formula = normalized_formula.replace("(", "").replace(")", "")
+    if "1/x" in reciprocal_formula or "x**-1" in reciprocal_formula:
+        return "reciprocal_asymptote"
+    if "log" in normalized_formula or "sqrt" in normalized_formula:
+        return "domain_limited"
+    return "smooth"
+
+
+def get_sampling_points(base_points: int, function_type: str) -> int:
+    if function_type in {"tan_asymptote", "reciprocal_asymptote"}:
+        return max(base_points * 3, 800)
+    return base_points
+
+
+def _insert_x_gap_separators(x_values, keep_mask):
+    kept_indices = np.flatnonzero(keep_mask)
+    if kept_indices.size == 0:
+        return np.array([], dtype=float)
+
+    gap_positions = np.flatnonzero(np.diff(kept_indices) > 1) + 1
+    return np.insert(
+        x_values[kept_indices],
+        gap_positions,
+        np.nan,
+    )
+
+
+def build_safe_x_grid(x_min, x_max, points, function_type):
+    x_values = np.linspace(x_min, x_max, points)
+    if function_type not in {"tan_asymptote", "reciprocal_asymptote"}:
+        return x_values
+
+    epsilon = abs(x_max - x_min) / points * 2
+    keep_mask = np.ones(x_values.shape, dtype=bool)
+
+    if function_type == "tan_asymptote":
+        first_k = int(np.floor((x_min - np.pi / 2) / np.pi)) - 1
+        last_k = int(np.ceil((x_max - np.pi / 2) / np.pi)) + 1
+        for k in range(first_k, last_k + 1):
+            asymptote = np.pi / 2 + k * np.pi
+            keep_mask &= np.abs(x_values - asymptote) >= epsilon
+    elif x_min <= 0 <= x_max:
+        keep_mask &= np.abs(x_values) >= epsilon
+
+    # NaN separators preserve gaps while keeping one x array and one plot artist.
+    return _insert_x_gap_separators(x_values, keep_mask)
+
+
+def preprocess_y_for_plotting(x, y, function_type):
+    if y is None:
+        return None
+
+    try:
+        processed_y = np.asarray(y, dtype=float).copy()
+    except (TypeError, ValueError):
+        return None
+
+    processed_y[~np.isfinite(processed_y)] = np.nan
+    return processed_y
+
+
+def _prepare_function_values(
+    formula,
+    x,
+    y,
+    expected_length,
+    function_type=None,
+):
+    if function_type is None:
+        function_type = classify_function(formula)
+
+    processed_y = preprocess_y_for_plotting(
+        x,
+        y,
+        function_type,
+    )
+    if processed_y is None:
+        return None, "Invalid formula."
+    if processed_y.ndim != 1 or len(processed_y) != expected_length:
+        return None, "Formula returned an unsupported result."
+    if not np.isfinite(processed_y).any():
+        return None, "Formula has no valid values in the selected x range."
+    return processed_y, ""
+
+
 class FunctionPlotterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
+
+        self.functions = []
+        self.render_mode = "debounced"
+        self._replot_job = None
+        self.debounce_delay_ms = 300
+        self._plot_ready = False
 
         self.title("Function Plotter")
         self.geometry("1200x700")
@@ -78,6 +171,7 @@ class FunctionPlotterApp(ctk.CTk):
         self.x_min_entry = ctk.CTkEntry(self.input_frame)
         self.x_min_entry.insert(0, "-10")
         self.x_min_entry.grid(row=2, column=1, padx=8, pady=8, sticky="ew")
+        self.x_min_entry.bind("<KeyRelease>", self._on_plot_input_changed)
 
         self.x_max_label = ctk.CTkLabel(self.input_frame, text="X max:")
         self.x_max_label.grid(row=3, column=0, padx=8, pady=8, sticky="w")
@@ -85,28 +179,39 @@ class FunctionPlotterApp(ctk.CTk):
         self.x_max_entry = ctk.CTkEntry(self.input_frame)
         self.x_max_entry.insert(0, "10")
         self.x_max_entry.grid(row=3, column=1, padx=8, pady=8, sticky="ew")
+        self.x_max_entry.bind("<KeyRelease>", self._on_plot_input_changed)
 
         self.points_label = ctk.CTkLabel(self.input_frame, text="Points:")
         self.points_label.grid(row=4, column=0, padx=8, pady=8, sticky="w")
 
         self.points_entry = ctk.CTkEntry(self.input_frame)
-        self.points_entry.insert(0, "200")
+        self.points_entry.insert(0, "250")
         self.points_entry.grid(row=4, column=1, padx=8, pady=8, sticky="ew")
+        self.points_entry.bind("<KeyRelease>", self._on_plot_input_changed)
 
         self.plot_button = ctk.CTkButton(
             self.input_frame,
-            text="Plot graph",
-            command=self.plot_graph,
+            text="Replot",
+            command=self.trigger_replot,
         )
         self.plot_button.grid(
             row=5, column=0, columnspan=2, padx=8, pady=12, sticky="ew"
+        )
+
+        self.instant_render_switch = ctk.CTkSwitch(
+            self.input_frame,
+            text="Instant render (no debounce)",
+            command=self._on_render_mode_changed,
+        )
+        self.instant_render_switch.grid(
+            row=6, column=0, columnspan=2, padx=8, pady=(0, 12), sticky="w"
         )
 
         self.input_frame.grid_columnconfigure(1, weight=1)
 
         self.status_label = ctk.CTkLabel(
             self.left_panel,
-            text="Enter a formula and click Plot graph.",
+            text="Enter a formula and click Add Function.",
             wraplength=320,
         )
         self.status_label.pack(fill="x", padx=20, pady=(0, 12))
@@ -126,88 +231,217 @@ class FunctionPlotterApp(ctk.CTk):
             padx=12,
             pady=(0, 12),
         )
+        self._plot_ready = True
+        self.trigger_replot()
 
     def _create_formula_section(self):
         self.formula_frame = ctk.CTkFrame(self.input_frame, fg_color="transparent")
         self.formula_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
         self.formula_frame.grid_columnconfigure(1, weight=1)
 
-        self.formula_rows = []
+        self.formula_label = ctk.CTkLabel(
+            self.formula_frame,
+            text="Formula:",
+        )
+        self.formula_label.grid(row=0, column=0, padx=4, pady=8, sticky="w")
+
+        self.formula_entry = ctk.CTkEntry(self.formula_frame)
+        self.formula_entry.grid(
+            row=0,
+            column=1,
+            columnspan=2,
+            padx=4,
+            pady=8,
+            sticky="ew",
+        )
+        self.formula_entry.bind("<Return>", self.add_function)
+
         self.add_function_button = ctk.CTkButton(
-            self.input_frame,
-            text="Add function",
-            command=self._add_formula_row,
+            self.formula_frame,
+            text="Add Function",
+            command=self.add_function,
         )
         self.add_function_button.grid(
-            row=1, column=0, columnspan=2, padx=8, pady=(0, 8), sticky="ew"
+            row=1, column=0, padx=4, pady=(0, 8), sticky="ew"
         )
-        self._add_formula_row("x**2")
-
-    def _add_formula_row(self, formula=""):
-        if len(self.formula_rows) >= MAX_FUNCTIONS:
-            return
-
-        label = ctk.CTkLabel(self.formula_frame, text="")
-        entry = ctk.CTkEntry(self.formula_frame)
-        entry.insert(0, formula)
-        remove_button = ctk.CTkButton(
+        self.update_function_button = ctk.CTkButton(
             self.formula_frame,
-            text="Remove",
-            width=68,
+            text="Update Function",
+            command=self.update_selected_function,
+        )
+        self.update_function_button.grid(
+            row=1, column=1, padx=4, pady=(0, 8), sticky="ew"
+        )
+        self.remove_function_button = ctk.CTkButton(
+            self.formula_frame,
+            text="Remove Selected",
+            command=self.remove_selected_function,
+        )
+        self.remove_function_button.grid(
+            row=1, column=2, padx=4, pady=(0, 8), sticky="ew"
         )
 
-        formula_row = {
-            "label": label,
-            "entry": entry,
-            "remove_button": remove_button,
-        }
-        remove_button.configure(
-            command=lambda row=formula_row: self._remove_formula_row(row)
+        self.function_list_label = ctk.CTkLabel(
+            self.formula_frame,
+            text="Active functions:",
         )
-        self.formula_rows.append(formula_row)
-        self._refresh_formula_rows()
+        self.function_list_label.grid(
+            row=2, column=0, columnspan=3, padx=4, sticky="w"
+        )
 
-    def _remove_formula_row(self, formula_row):
-        if len(self.formula_rows) == 1:
+        self.function_list = tk.Listbox(
+            self.formula_frame,
+            height=6,
+            selectmode=tk.SINGLE,
+            exportselection=False,
+        )
+        self.function_list.bind("<<ListboxSelect>>", self._on_function_selected)
+        self.function_list.grid(
+            row=3, column=0, columnspan=3, padx=4, pady=(4, 8), sticky="ew"
+        )
+        self.update_function_list()
+
+    def add_function(self, _event=None):
+        formula = self.formula_entry.get().strip()
+        if not formula:
+            self.status_label.configure(text="Error: enter a formula to add.")
             return
 
-        for widget in formula_row.values():
-            widget.destroy()
-
-        self.formula_rows.remove(formula_row)
-        self._refresh_formula_rows()
-
-    def _refresh_formula_rows(self):
-        for row_number, formula_row in enumerate(self.formula_rows, start=1):
-            formula_row["label"].configure(text=f"Formula {row_number}:")
-            formula_row["label"].grid(
-                row=row_number - 1, column=0, padx=4, pady=8, sticky="w"
+        if len(self.functions) >= MAX_FUNCTIONS:
+            self.status_label.configure(
+                text=f"Error: a maximum of {MAX_FUNCTIONS} functions is allowed."
             )
-            formula_row["entry"].grid(
-                row=row_number - 1, column=1, padx=4, pady=8, sticky="ew"
+            return
+
+        self.functions.append(formula)
+        self.formula_entry.delete(0, "end")
+        self.update_function_list()
+        self.trigger_replot()
+
+    def _on_function_selected(self, _event=None):
+        selection = self.function_list.curselection()
+        if not selection:
+            return
+
+        self.formula_entry.delete(0, "end")
+        self.formula_entry.insert(0, self.functions[selection[0]])
+
+    def update_selected_function(self):
+        selection = self.function_list.curselection()
+        if not selection:
+            self.status_label.configure(
+                text="Select a function from the list to update."
             )
-            formula_row["remove_button"].grid(
-                row=row_number - 1, column=2, padx=4, pady=8
+            return
+
+        formula = self.formula_entry.get().strip()
+        if not formula:
+            self.status_label.configure(text="Error: enter an updated formula.")
+            return
+
+        try:
+            x_min = float(self.x_min_entry.get())
+            x_max = float(self.x_max_entry.get())
+            points = int(self.points_entry.get())
+        except ValueError:
+            self.status_label.configure(
+                text="Error: x_min, x_max and points must be numbers."
             )
+            return
 
-        self._update_formula_controls_state()
+        if x_min >= x_max or points < 2:
+            self.status_label.configure(
+                text="Error: use a valid x range and at least 2 points."
+            )
+            return
 
-    def _update_formula_controls_state(self):
-        remove_state = "disabled" if len(self.formula_rows) == 1 else "normal"
-        for formula_row in self.formula_rows:
-            formula_row["remove_button"].configure(state=remove_state)
+        function_type = classify_function(formula)
+        function_points = get_sampling_points(points, function_type)
+        x_plot = build_safe_x_grid(
+            x_min,
+            x_max,
+            function_points,
+            function_type,
+        )
+        if x_plot.size == 0:
+            self.status_label.configure(text="Error: no plottable x values.")
+            return
 
-        add_state = "disabled" if len(self.formula_rows) >= MAX_FUNCTIONS else "normal"
-        self.add_function_button.configure(state=add_state)
+        y = evaluate_formula(formula, x_plot)
+        processed_y, error_message = _prepare_function_values(
+            formula,
+            x_plot,
+            y,
+            len(x_plot),
+            function_type,
+        )
+        if processed_y is None:
+            self.status_label.configure(text=f"Error: {error_message}")
+            return
 
-    def _get_non_empty_formulas(self):
-        formulas = []
-        for row_number, formula_row in enumerate(self.formula_rows, start=1):
-            formula = formula_row["entry"].get().strip()
-            if formula:
-                formulas.append((row_number, formula))
+        selected_index = selection[0]
+        self.functions[selected_index] = formula
+        self.update_function_list()
+        self.function_list.selection_set(selected_index)
+        self.function_list.activate(selected_index)
+        self.trigger_replot()
 
-        return formulas
+    def remove_selected_function(self):
+        selection = self.function_list.curselection()
+        if not selection:
+            self.status_label.configure(
+                text="Select a function from the list to remove."
+            )
+            return
+
+        self.functions.pop(selection[0])
+        self.update_function_list()
+        self.trigger_replot()
+
+    def update_function_list(self):
+        self.function_list.delete(0, tk.END)
+        for formula in self.functions:
+            self.function_list.insert(tk.END, formula)
+
+        self.add_function_button.configure(
+            state="disabled" if len(self.functions) >= MAX_FUNCTIONS else "normal"
+        )
+
+    def _on_plot_input_changed(self, _event=None):
+        self.trigger_replot()
+
+    def _on_render_mode_changed(self):
+        self.render_mode = (
+            "instant" if self.instant_render_switch.get() else "debounced"
+        )
+        if self.render_mode == "instant":
+            self._cancel_scheduled_replot()
+
+    def trigger_replot(self):
+        if not self._plot_ready:
+            return
+
+        if self.render_mode == "instant":
+            self._cancel_scheduled_replot()
+            self.replot()
+        else:
+            self.schedule_replot()
+
+    def schedule_replot(self):
+        self._cancel_scheduled_replot()
+        self._replot_job = self.after(
+            self.debounce_delay_ms,
+            self._run_scheduled_replot,
+        )
+
+    def _cancel_scheduled_replot(self):
+        if self._replot_job is not None:
+            self.after_cancel(self._replot_job)
+            self._replot_job = None
+
+    def _run_scheduled_replot(self):
+        self._replot_job = None
+        self.replot()
 
     def _create_toolbar(self):
         self.toolbar_frame = ctk.CTkFrame(self.right_panel)
@@ -232,9 +466,7 @@ class FunctionPlotterApp(ctk.CTk):
             button.grid(row=0, column=column, padx=4, pady=6, sticky="ew")
             self.toolbar_frame.grid_columnconfigure(column, weight=1)
 
-    def plot_graph(self):
-        formulas = self._get_non_empty_formulas()
-
+    def replot(self):
         try:
             x_min = float(self.x_min_entry.get())
             x_max = float(self.x_max_entry.get())
@@ -242,12 +474,6 @@ class FunctionPlotterApp(ctk.CTk):
         except ValueError:
             self.status_label.configure(
                 text="Error: x_min, x_max and points must be numbers."
-            )
-            return
-
-        if not formulas:
-            self.status_label.configure(
-                text="Error: enter at least one formula to plot."
             )
             return
 
@@ -259,39 +485,62 @@ class FunctionPlotterApp(ctk.CTk):
             self.status_label.configure(text="Error: points must be at least 2.")
             return
 
-        x = np.linspace(x_min, x_max, points)
-        plot_data = []
-
-        for formula_number, formula in formulas:
-            y = evaluate_formula(formula, x)
-            prepared_y, error_message = prepare_y_values_for_plotting(
-                y,
-                expected_length=points,
-            )
-            if prepared_y is None:
-                self.status_label.configure(
-                    text=f"Error in Formula {formula_number}: {error_message}"
-                )
-                return
-
-            plot_data.append((formula, prepared_y))
+        errors = []
 
         self.ax.clear()
-        for formula, y in plot_data:
-            self.ax.plot(x, y, label=formula)
+        for formula_number, formula in enumerate(self.functions, start=1):
+            function_type = classify_function(formula)
+            function_points = get_sampling_points(points, function_type)
+            x_plot = build_safe_x_grid(
+                x_min,
+                x_max,
+                function_points,
+                function_type,
+            )
+            if x_plot.size == 0:
+                errors.append(
+                    f"Function {formula_number}: no plottable x values."
+                )
+                continue
+
+            y = evaluate_formula(formula, x_plot)
+            processed_y, error_message = _prepare_function_values(
+                formula,
+                x_plot,
+                y,
+                len(x_plot),
+                function_type,
+            )
+            if processed_y is None:
+                errors.append(f"Function {formula_number}: {error_message}")
+                continue
+
+            self.ax.plot(x_plot, processed_y, label=formula)
 
         self.ax.set_title("Function Plotter")
         self.ax.set_xlabel("x")
         self.ax.set_ylabel("y")
         self.ax.grid(True)
-        self.ax.legend()
+        if self.ax.lines:
+            self.ax.legend()
 
         self.canvas.draw()
 
-        self.status_label.configure(text="Graph plotted successfully.")
+        if errors:
+            self.status_label.configure(text="Error: " + " ".join(errors))
+        elif self.functions:
+            self.status_label.configure(text="Graph updated successfully.")
+        else:
+            self.status_label.configure(text="Add a function to start plotting.")
+
+    def plot_graph(self):
+        """Backward-compatible alias for the previous plot action."""
+        self.trigger_replot()
 
     def on_closing(self):
         """Close the app and clean up matplotlib resources."""
+        self._cancel_scheduled_replot()
+
         if hasattr(self, "toolbar"):
             self.toolbar.destroy()
 
