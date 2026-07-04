@@ -31,13 +31,21 @@ class FunctionPlotterApp(ctk.CTk):
         self._create_widgets()
 
     def _set_window_icon(self):
-        icon_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.png"
+        png_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.png"
+        ico_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.ico"
 
+        # 1. Иконка через Tkinter (PNG)
         try:
-            self.app_icon = tk.PhotoImage(file=str(icon_path))
+            self.app_icon = tk.PhotoImage(file=str(png_path))
             self.iconphoto(True, self.app_icon)
         except (OSError, tk.TclError):
             self.app_icon = None
+            
+        # 2. Иконка уровня ОС (Windows taskbar + window fallback)
+        try:
+            self.iconbitmap(str(ico_path))
+        except Exception:
+            pass
 
     def _create_widgets(self):
         self.paned_window = tk.PanedWindow(
