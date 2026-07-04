@@ -1,5 +1,6 @@
+import os
+import sys
 import tkinter as tk
-from pathlib import Path
 
 import customtkinter as ctk
 import matplotlib.pyplot as plt
@@ -12,6 +13,11 @@ from plotter.evaluator import (
 )
 
 MAX_FUNCTIONS = 5
+
+
+def _resource_path(path):
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(__file__)))
+    return os.path.join(base, path)
 
 
 class FunctionPlotterApp(ctk.CTk):
@@ -31,19 +37,9 @@ class FunctionPlotterApp(ctk.CTk):
         self._create_widgets()
 
     def _set_window_icon(self):
-        png_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.png"
-        ico_path = Path(__file__).resolve().parent.parent / "assets" / "app_icon.ico"
-
-        # 1. Иконка через Tkinter (PNG)
+        icon_path = _resource_path("assets/app_icon.ico")
         try:
-            self.app_icon = tk.PhotoImage(file=str(png_path))
-            self.iconphoto(True, self.app_icon)
-        except (OSError, tk.TclError):
-            self.app_icon = None
-            
-        # 2. Иконка уровня ОС (Windows taskbar + window fallback)
-        try:
-            self.iconbitmap(str(ico_path))
+            self.iconbitmap(icon_path)
         except Exception:
             pass
 
