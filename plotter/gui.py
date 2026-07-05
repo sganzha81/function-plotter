@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
+from plotter.domain_engine import analyze_domain
 from plotter.evaluator import evaluate_formula
 
 MAX_FUNCTIONS = 5
@@ -17,101 +18,12 @@ def _resource_path(path):
     return os.path.join(base, path)
 
 
-def classify_function(formula: str) -> str:
-    normalized_formula = formula.lower().replace(" ", "")
-
-    if "tan" in normalized_formula:
-        return "tan_asymptote"
-    reciprocal_formula = normalized_formula.replace("(", "").replace(")", "")
-    if "1/x" in reciprocal_formula or "x**-1" in reciprocal_formula:
-        return "reciprocal_asymptote"
-    if "log" in normalized_formula or "sqrt" in normalized_formula:
-        return "domain_limited"
-    return "smooth"
-
-
-def get_sampling_points(base_points: int, function_type: str) -> int:
-    if function_type in {"tan_asymptote", "reciprocal_asymptote"}:
-        return max(base_points * 3, 800)
-    return base_points
-
-
-def _insert_x_gap_separators(x_values, keep_mask):
-    kept_indices = np.flatnonzero(keep_mask)
-    if kept_indices.size == 0:
-        return np.array([], dtype=float)
-
-    gap_positions = np.flatnonzero(np.diff(kept_indices) > 1) + 1
-    return np.insert(
-        x_values[kept_indices],
-        gap_positions,
-        np.nan,
-    )
-
-
-def build_safe_x_grid(x_min, x_max, points, function_type):
-    x_values = np.linspace(x_min, x_max, points)
-    if function_type not in {"tan_asymptote", "reciprocal_asymptote"}:
-        return x_values
-
-    epsilon = abs(x_max - x_min) / points * 2
-    keep_mask = np.ones(x_values.shape, dtype=bool)
-
-    if function_type == "tan_asymptote":
-        first_k = int(np.floor((x_min - np.pi / 2) / np.pi)) - 1
-        last_k = int(np.ceil((x_max - np.pi / 2) / np.pi)) + 1
-        for k in range(first_k, last_k + 1):
-            asymptote = np.pi / 2 + k * np.pi
-            keep_mask &= np.abs(x_values - asymptote) >= epsilon
-    elif x_min <= 0 <= x_max:
-        keep_mask &= np.abs(x_values) >= epsilon
-
-    # NaN separators preserve gaps while keeping one x array and one plot artist.
-    return _insert_x_gap_separators(x_values, keep_mask)
-
-
-def preprocess_y_for_plotting(x, y, function_type):
-    if y is None:
-        return None
-
-    try:
-        processed_y = np.asarray(y, dtype=float).copy()
-    except (TypeError, ValueError):
-        return None
-
-    processed_y[~np.isfinite(processed_y)] = np.nan
-    return processed_y
-
-
-def _prepare_function_values(
-    formula,
-    x,
-    y,
-    expected_length,
-    function_type=None,
-):
-    if function_type is None:
-        function_type = classify_function(formula)
-
-    processed_y = preprocess_y_for_plotting(
-        x,
-        y,
-        function_type,
-    )
-    if processed_y is None:
-        return None, "Invalid formula."
-    if processed_y.ndim != 1 or len(processed_y) != expected_length:
-        return None, "Formula returned an unsupported result."
-    if not np.isfinite(processed_y).any():
-        return None, "Formula has no valid values in the selected x range."
-    return processed_y, ""
-
-
 class FunctionPlotterApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.functions = []
+        self.domain_signals = []
         self.render_mode = "debounced"
         self._replot_job = None
         self.debounce_delay_ms = 300
@@ -355,28 +267,10 @@ class FunctionPlotterApp(ctk.CTk):
             )
             return
 
-        function_type = classify_function(formula)
-        function_points = get_sampling_points(points, function_type)
-        x_plot = build_safe_x_grid(
-            x_min,
-            x_max,
-            function_points,
-            function_type,
-        )
-        if x_plot.size == 0:
-            self.status_label.configure(text="Error: no plottable x values.")
-            return
-
-        y = evaluate_formula(formula, x_plot)
-        processed_y, error_message = _prepare_function_values(
-            formula,
-            x_plot,
-            y,
-            len(x_plot),
-            function_type,
-        )
-        if processed_y is None:
-            self.status_label.configure(text=f"Error: {error_message}")
+        x = np.linspace(x_min, x_max, points)
+        y = evaluate_formula(formula, x)
+        if y is None:
+            self.status_label.configure(text="Error: invalid formula.")
             return
 
         selected_index = selection[0]
@@ -466,6 +360,23 @@ class FunctionPlotterApp(ctk.CTk):
             button.grid(row=0, column=column, padx=4, pady=6, sticky="ew")
             self.toolbar_frame.grid_columnconfigure(column, weight=1)
 
+    def _plot_function_segments(self, x, y, formula, segment_breaks):
+        x_segments = np.split(x, segment_breaks)
+        y_segments = np.split(y, segment_breaks)
+        color = None
+
+        for segment_number, (x_segment, y_segment) in enumerate(
+            zip(x_segments, y_segments)
+        ):
+            line, = self.ax.plot(
+                x_segment,
+                y_segment,
+                color=color,
+                label=formula if segment_number == 0 else None,
+            )
+            if color is None:
+                color = line.get_color()
+
     def replot(self):
         try:
             x_min = float(self.x_min_entry.get())
@@ -486,36 +397,24 @@ class FunctionPlotterApp(ctk.CTk):
             return
 
         errors = []
+        x = np.linspace(x_min, x_max, points)
+        self.domain_signals = []
 
         self.ax.clear()
         for formula_number, formula in enumerate(self.functions, start=1):
-            function_type = classify_function(formula)
-            function_points = get_sampling_points(points, function_type)
-            x_plot = build_safe_x_grid(
-                x_min,
-                x_max,
-                function_points,
-                function_type,
-            )
-            if x_plot.size == 0:
-                errors.append(
-                    f"Function {formula_number}: no plottable x values."
-                )
+            y = evaluate_formula(formula, x)
+            if y is None:
+                errors.append(f"Function {formula_number}: invalid formula.")
                 continue
 
-            y = evaluate_formula(formula, x_plot)
-            processed_y, error_message = _prepare_function_values(
-                formula,
-                x_plot,
+            signals = analyze_domain(x, y, formula)
+            self.domain_signals.append(signals)
+            self._plot_function_segments(
+                x,
                 y,
-                len(x_plot),
-                function_type,
+                formula,
+                signals["segment_breaks"],
             )
-            if processed_y is None:
-                errors.append(f"Function {formula_number}: {error_message}")
-                continue
-
-            self.ax.plot(x_plot, processed_y, label=formula)
 
         self.ax.set_title("Function Plotter")
         self.ax.set_xlabel("x")

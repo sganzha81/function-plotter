@@ -2,60 +2,37 @@ import unittest
 
 import numpy as np
 
-from plotter.evaluator import evaluate_formula, prepare_y_values_for_plotting
+from plotter.evaluator import evaluate_formula
 
 
-class PrepareYValuesForPlottingTests(unittest.TestCase):
+class EvaluateFormulaTests(unittest.TestCase):
     def setUp(self):
-        self.x = np.linspace(-10, 10, 200)
+        self.x = np.linspace(-10, 10, 201)
 
-    def prepare_formula(self, formula):
-        y = evaluate_formula(formula, self.x)
-        return prepare_y_values_for_plotting(y, expected_length=len(self.x))
+    def test_evaluates_array_formula(self):
+        result = evaluate_formula("x**2", self.x)
 
-    def test_rejects_non_array_results(self):
-        prepared_y, error_message = prepare_y_values_for_plotting(1.0)
+        np.testing.assert_allclose(result, self.x**2)
 
-        self.assertIsNone(prepared_y)
-        self.assertIn("depend on x", error_message)
+    def test_broadcasts_scalar_result_to_x_shape(self):
+        result = evaluate_formula("2", self.x)
 
-    def test_rejects_formula_without_finite_values(self):
-        prepared_y, error_message = self.prepare_formula("sqrt(-x**2 - 1)")
+        np.testing.assert_array_equal(result, np.full(self.x.shape, 2.0))
 
-        self.assertIsNone(prepared_y)
-        self.assertIn("no valid values", error_message)
+    def test_normalizes_infinity_to_nan(self):
+        result = evaluate_formula("1/x", self.x)
 
-    def test_preserves_valid_part_of_domain(self):
-        for formula in ("sqrt(x)", "log(x)"):
-            with self.subTest(formula=formula):
-                prepared_y, error_message = self.prepare_formula(formula)
+        self.assertTrue(np.isnan(result[len(self.x) // 2]))
+        self.assertFalse(np.isinf(result).any())
 
-                self.assertEqual(error_message, "")
-                self.assertTrue(np.isnan(prepared_y[self.x < 0]).all())
-                self.assertTrue(np.isfinite(prepared_y[self.x > 0]).any())
+    def test_preserves_domain_nan_values(self):
+        result = evaluate_formula("sqrt(x)", self.x)
 
-    def test_inserts_gap_for_reciprocal_asymptote(self):
-        prepared_y, error_message = self.prepare_formula("1/x")
+        self.assertTrue(np.isnan(result[self.x < 0]).all())
+        self.assertTrue(np.isfinite(result[self.x >= 0]).all())
 
-        self.assertEqual(error_message, "")
-        center = len(self.x) // 2
-        self.assertTrue(np.isnan(prepared_y[center - 2 : center + 3]).any())
-        self.assertTrue(np.isfinite(prepared_y[: center - 2]).any())
-        self.assertTrue(np.isfinite(prepared_y[center + 3 :]).any())
-
-    def test_inserts_gaps_for_tangent_asymptotes(self):
-        prepared_y, error_message = self.prepare_formula("tan(x)")
-
-        self.assertEqual(error_message, "")
-        self.assertGreater(np.isnan(prepared_y).sum(), 1)
-        self.assertTrue(np.isfinite(prepared_y).any())
-
-    def test_does_not_modify_source_array(self):
-        y = np.array([1.0, np.inf, 2.0])
-
-        prepare_y_values_for_plotting(y)
-
-        self.assertTrue(np.isinf(y[1]))
+    def test_rejects_invalid_formula(self):
+        self.assertIsNone(evaluate_formula("not_a_function(x)", self.x))
 
 
 if __name__ == "__main__":
